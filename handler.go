@@ -23,14 +23,14 @@ var errorNoMessageFound = errors.New("no message found")
 
 // Handler g2l handler interface.
 type Handler interface {
-	Run() error
+	Run(time.Time) error
 }
 
 type handler struct {
-	gmail          *gmail.Service
-	line           *linebot.Client
-	forwardLineID  string
-	intervalSecond time.Duration
+	gmail           *gmail.Service
+	line            *linebot.Client
+	forwardLineID   string
+	intervalMinutes time.Duration
 }
 
 type message struct {
@@ -44,22 +44,25 @@ func New(
 	gmailClient *gmail.Service,
 	lineClient *linebot.Client,
 	forwardLineID string,
-	intervalSecond time.Duration,
+	intervalMinutes time.Duration,
 ) Handler {
 	return &handler{
-		gmail:          gmailClient,
-		line:           lineClient,
-		forwardLineID:  forwardLineID,
-		intervalSecond: intervalSecond,
+		gmail:           gmailClient,
+		line:            lineClient,
+		forwardLineID:   forwardLineID,
+		intervalMinutes: intervalMinutes,
 	}
 }
 
 // Run running g2l program.
-func (h *handler) Run() error {
-	now := time.Now()
-	border := now.Add(-h.intervalSecond)
+func (h *handler) Run(now time.Time) error {
+	border := now.Add(-h.intervalMinutes)
 	msg, err := h.gmailMessagesByPeriod(border)
 	if err != nil {
+		if err == errorNoMessageFound {
+			fmt.Println(errorNoMessageFound)
+			return nil
+		}
 		return fmt.Errorf("error gmailMessagesByPeriod: %w", err)
 	}
 	if err := h.forwardToLine(msg); err != nil {
@@ -72,7 +75,7 @@ func (h *handler) gmailMessagesByPeriod(border time.Time) ([]*message, error) {
 	res, err := h.gmail.Users.Messages.
 		List(gmailUserID).
 		Fields(gmailMessageFields).
-		Q(fmt.Sprintf("%s after:%s", gmailMessageQuery, border.Format(time.RFC3339))).
+		Q(fmt.Sprintf("%s after:%d", gmailMessageQuery, border.Unix())).
 		Do()
 
 	if err != nil {
@@ -98,7 +101,17 @@ func (h *handler) gmailMessagesByPeriod(border time.Time) ([]*message, error) {
 func (h *handler) GmailMessage(messageID string) (*message, error) {
 	m, _ := h.gmail.Users.Messages.Get(gmailUserID, messageID).Do()
 	msg := new(message)
-	for _, h := range m.Payload.Headers {
+	msg = setHeaders(msg, m.Payload.Headers)
+	body, err := decodeBody(m.Payload)
+	if err != nil {
+		return nil, err
+	}
+	msg.body = body
+	return msg, nil
+}
+
+func setHeaders(msg *message, headers []*gmail.MessagePartHeader) *message {
+	for _, h := range headers {
 		switch h.Name {
 		case "From":
 			msg.from = h.Value
@@ -106,12 +119,27 @@ func (h *handler) GmailMessage(messageID string) (*message, error) {
 			msg.subject = h.Value
 		}
 	}
-	data, err := base64.URLEncoding.DecodeString(m.Payload.Body.Data)
-	if err != nil {
-		return nil, fmt.Errorf("base64 decode error: %w", err)
+	return msg
+}
+
+func decodeBody(payload *gmail.MessagePart) (string, error) {
+	if payload.MimeType != "text/plain" {
+		var body string
+		for _, p := range payload.Parts {
+			b, err := decodeBody(p)
+			if err != nil {
+				return "", err
+			}
+			body += b
+		}
+		return body, nil
 	}
-	msg.body = string(data)
-	return msg, nil
+
+	b, err := base64.URLEncoding.DecodeString(payload.Body.Data)
+	if err != nil {
+		return "", fmt.Errorf("base64 decode error: %w", err)
+	}
+	return string(b), nil
 }
 
 func (h *handler) forwardToLine(forwardMessages []*message) error {

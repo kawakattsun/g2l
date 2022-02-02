@@ -12,6 +12,11 @@ build: bin/g2l
 bin/g2l: $(BUILD_FILES)
 	@go build -trimpath -ldflags "$(GO_LDFLAGS)" -o "$@" ./cmd/g2l
 
+build-lambda: deploy/lambda/g2l
+
+deploy/lambda/g2l: $(BUILD_FILES)
+	@go build -trimpath -ldflags "$(GO_LDFLAGS)" -o "$@" ./cmd/g2l
+
 lint:
 	@echo "golint running..."
 	@golint ./...
