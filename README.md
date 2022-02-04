@@ -1,3 +1,3 @@
 # g2l
 
-Gmail forward to LINE Message tool.
+Gmail forward to LINE Message.
