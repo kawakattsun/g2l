@@ -24,6 +24,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
+	"google.golang.org/api/option"
 )
 
 var (
@@ -37,12 +38,12 @@ var (
 		os.Getenv("AWS_LAMBDA_RUNTIME_API") != ""
 )
 
-func getClient(config *oauth2.Config, f io.Reader) (*http.Client, error) {
+func getClient(ctx context.Context, config *oauth2.Config, f io.Reader) (*http.Client, error) {
 	tok, err := tokenFromFile(f)
 	if err != nil {
 		return nil, err
 	}
-	return config.Client(context.Background(), tok), nil
+	return config.Client(ctx, tok), nil
 }
 
 func tokenFromFile(f io.Reader) (*oauth2.Token, error) {
@@ -58,11 +59,12 @@ func newGmailClient(jsonBytes []byte, token []byte) (*gmail.Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse client secret file to config: %w", err)
 	}
-	client, err := getClient(config, bytes.NewReader(token))
+	ctx := context.Background()
+	client, err := getClient(ctx, config, bytes.NewReader(token))
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve http client: %w", err)
 	}
-	return gmail.New(client)
+	return gmail.NewService(ctx, option.WithHTTPClient(client))
 }
 
 func newLinebotClient(secret, token string) (*linebot.Client, error) {
@@ -86,13 +88,13 @@ type parameters struct {
 	intervalMinutes        string
 }
 
-const (
-	googleTokenName            = "googleToken"
-	googleCredentialsName      = "googleCredentials"
-	lineChannelSecretName      = "lineChannelSecret"
-	lineChannelAccessTokenName = "lineChannelAccessToken"
-	forwardLineIDName          = "forwardLineID"
-	intervalMinutesName        = "intervalMinutes"
+var (
+	googleTokenName            = os.Getenv("GOOGLE_TOKEN")
+	googleCredentialsName      = os.Getenv("GOOGLE_CREDENTIALS")
+	lineChannelSecretName      = os.Getenv("LINE_CHANNEL_SECRET")
+	lineChannelAccessTokenName = os.Getenv("LINE_CHANNEL_ACCESS_TOKEN")
+	forwardLineIDName          = os.Getenv("FORWARD_LINE_ID")
+	intervalMinutes            = os.Getenv("INTERVAL_MINUTES")
 )
 
 func initParameter() (*parameters, error) {
@@ -104,7 +106,6 @@ func initParameter() (*parameters, error) {
 			lineChannelSecretName,
 			lineChannelAccessTokenName,
 			forwardLineIDName,
-			intervalMinutesName,
 		)
 		if err != nil {
 			return nil, err
@@ -121,31 +122,32 @@ func initParameter() (*parameters, error) {
 				p.lineChannelAccessToken = *sp.Value
 			case forwardLineIDName:
 				p.forwardLineID = *sp.Value
-			case intervalMinutesName:
-				p.intervalMinutes = *sp.Value
 			}
 		}
+		p.intervalMinutes = intervalMinutes
 		return p, nil
 	}
 
-	googleCredentialsJSONPath := flag.Arg(1)
-	googleTokenJSONPath := flag.Arg(2)
-	p.lineChannelSecret = flag.Arg(3)
-	p.lineChannelAccessToken = flag.Arg(4)
-	p.forwardLineID = flag.Arg(5)
-	p.intervalMinutes = flag.Arg(6)
+	flag.Parse()
+	googleCredentialsJSONPath := flag.Arg(0)
+	googleTokenJSONPath := flag.Arg(1)
+	p.lineChannelSecret = flag.Arg(2)
+	p.lineChannelAccessToken = flag.Arg(3)
+	p.forwardLineID = flag.Arg(4)
+	p.intervalMinutes = flag.Arg(5)
 
 	credentials, err := ioutil.ReadFile(googleCredentialsJSONPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed googleCredentialsJSON open file: %w", err)
 	}
 	p.googleCredentials = credentials
 
 	token, err := ioutil.ReadFile(googleTokenJSONPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed googleTokenJSON open file: %w", err)
 	}
 	p.googleToken = token
+
 	return p, nil
 }
 
@@ -154,8 +156,7 @@ func loadSSMParameter(
 	googleCredentialsName,
 	lineChannelSecretName,
 	lineChannelAccessTokenName,
-	forwardLineIDName,
-	intervalMinutesName string,
+	forwardLineIDName string,
 ) ([]*ssm.Parameter, error) {
 	svc := ssm.New(
 		session.Must(session.NewSession()),
@@ -168,7 +169,6 @@ func loadSSMParameter(
 			&lineChannelSecretName,
 			&lineChannelAccessTokenName,
 			&forwardLineIDName,
-			&intervalMinutesName,
 		},
 		WithDecryption: aws.Bool(true),
 	}
@@ -183,25 +183,25 @@ func loadSSMParameter(
 func main() {
 	p, err := initParameter()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to init parameter: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to init parameter: %v\n", err)
 		os.Exit(1)
 	}
 
 	gmailClient, err := newGmailClient(p.googleCredentials, p.googleToken)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to retrieve Gmail client: %v", err)
+		fmt.Fprintf(os.Stderr, "Unable to retrieve Gmail client: %v\n", err)
 		os.Exit(1)
 	}
 
 	lineClient, err := newLinebotClient(p.lineChannelSecret, p.lineChannelAccessToken)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to retrieve Linebot client: %v", err)
+		fmt.Fprintf(os.Stderr, "Unable to retrieve Linebot client: %v\n", err)
 		os.Exit(1)
 	}
 
 	interval, err := parseIntervalMinutes(p.intervalMinutes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to parse intervalMinutes: %v", err)
+		fmt.Fprintf(os.Stderr, "Unable to parse intervalMinutes: %v\n", err)
 		os.Exit(1)
 	}
 

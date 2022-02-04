@@ -1,13 +1,14 @@
 package main
 
 import (
+	"os"
+
 	"github.com/aws/aws-cdk-go/awscdk"
 	"github.com/aws/aws-cdk-go/awscdk/awsevents"
 	"github.com/aws/aws-cdk-go/awscdk/awseventstargets"
 	"github.com/aws/aws-cdk-go/awscdk/awslambda"
 	"github.com/aws/aws-cdk-go/awscdk/awslambdago"
 	"github.com/aws/aws-cdk-go/awscdk/awslogs"
-	"github.com/aws/aws-cdk-go/awscdk/awssam"
 	"github.com/aws/constructs-go/constructs/v3"
 	"github.com/aws/jsii-runtime-go"
 )
@@ -29,27 +30,15 @@ func NewCdkStack(scope constructs.Construct, id string, props *CdkStackProps) aw
 	return stack
 }
 
-func newSSMFunction(stack awscdk.Construct) {
-	awssam.NewCfnFunction(stack, jsii.String("G2LFunction"), &awssam.CfnFunctionProps{
-		FunctionName: jsii.String("G2LFunction"),
-		CodeUri:      jsii.String("../deploy/lambda/g2l"),
-		Handler:      jsii.String("main"),
-		Runtime:      awslambda.Runtime_GO_1_X().Name(),
-		MemorySize:   jsii.Number(128),
-		// Environment:  map[string]string{},
-		Events: map[string]*awssam.CfnFunction_EventSourceProperty{
-			"G2LFunctionSchedule": {
-				Properties: awssam.CfnFunction_ScheduleEventProperty{
-					Schedule: awsevents.Schedule_Rate(awscdk.Duration_Minutes(jsii.Number(1))).ExpressionString(),
-				},
-				Type: jsii.String("Schedule"),
-			},
-		},
-	})
-}
-
 func newFunction(stack awscdk.Construct) {
-	env := map[string]*string{}
+	env := map[string]*string{
+		"GOOGLE_TOKEN":              jsii.String(os.Getenv("GOOGLE_TOKEN")),
+		"GOOGLE_CREDENTIALS":        jsii.String(os.Getenv("GOOGLE_CREDENTIALS")),
+		"LINE_CHANNEL_SECRET":       jsii.String(os.Getenv("LINE_CHANNEL_SECRET")),
+		"LINE_CHANNEL_ACCESS_TOKEN": jsii.String(os.Getenv("LINE_CHANNEL_ACCESS_TOKEN")),
+		"FORWARD_LINE_ID":           jsii.String(os.Getenv("FORWARD_LINE_ID")),
+		"INTERVAL_MINUTES":          jsii.String(os.Getenv("INTERVAL_MINUTES")),
+	}
 	fn := awslambdago.NewGoFunction(stack, jsii.String("G2LFunction"), &awslambdago.GoFunctionProps{
 		Runtime:      awslambda.Runtime_GO_1_X(),
 		MemorySize:   jsii.Number(128),
@@ -58,14 +47,6 @@ func newFunction(stack awscdk.Construct) {
 		ModuleDir:    jsii.String("../"),
 		LogRetention: awslogs.RetentionDays_ONE_WEEK,
 	})
-	// fn := awslambda.NewFunction(stack, jsii.String("G2LFunction"), &awslambda.FunctionProps{
-	// 	FunctionName: jsii.String("G2LFunction"),
-	// 	Code:         awslambda.NewAssetCode(jsii.String("../deploy/lambda/g2l"), nil),
-	// 	Handler:      jsii.String("main"),
-	// 	Runtime:      awslambda.Runtime_GO_1_X(),
-	// 	MemorySize:   jsii.Number(128),
-	// 	Environment:  &env,
-	// })
 
 	targets := []awsevents.IRuleTarget{
 		awseventstargets.NewLambdaFunction(fn, nil),
@@ -96,7 +77,7 @@ func env() *awscdk.Environment {
 	// Account/Region-dependent features and context lookups will not work, but a
 	// single synthesized template can be deployed anywhere.
 	//---------------------------------------------------------------------------
-	return nil
+	// return nil
 
 	// Uncomment if you know exactly what account and region you want to deploy
 	// the stack to. This is the recommendation for production stacks.
@@ -110,8 +91,8 @@ func env() *awscdk.Environment {
 	// implied by the current CLI configuration. This is recommended for dev
 	// stacks.
 	//---------------------------------------------------------------------------
-	// return &awscdk.Environment{
-	//  Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
-	//  Region:  jsii.String(os.Getenv("CDK_DEFAULT_REGION")),
-	// }
+	return &awscdk.Environment{
+		Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
+		Region:  jsii.String(os.Getenv("CDK_DEFAULT_REGION")),
+	}
 }
