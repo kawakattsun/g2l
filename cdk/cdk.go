@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/aws/aws-cdk-go/awscdk"
 	"github.com/aws/aws-cdk-go/awscdk/awsevents"
 	"github.com/aws/aws-cdk-go/awscdk/awseventstargets"
+	"github.com/aws/aws-cdk-go/awscdk/awsiam"
 	"github.com/aws/aws-cdk-go/awscdk/awslambda"
 	"github.com/aws/aws-cdk-go/awscdk/awslambdago"
 	"github.com/aws/aws-cdk-go/awscdk/awslogs"
@@ -47,6 +49,24 @@ func newFunction(stack awscdk.Construct) {
 		ModuleDir:    jsii.String("../"),
 		LogRetention: awslogs.RetentionDays_ONE_WEEK,
 	})
+	actions := []*string{
+		jsii.String("sts:AssumeRole"),
+		jsii.String("ssm:GetParameters"),
+	}
+	resources := []*string{
+		jsii.String(
+			fmt.Sprintf("arn:aws:ssm:%s:%s:parameter/%s/*",
+				os.Getenv("CDK_DEFAULT_REGION"),
+				os.Getenv("CDK_DEFAULT_ACCOUNT"),
+				os.Getenv("PARAMETER_PREFIX"),
+			),
+		),
+	}
+	fn.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Effect:    awsiam.Effect_ALLOW,
+		Actions:   &actions,
+		Resources: &resources,
+	}))
 
 	targets := []awsevents.IRuleTarget{
 		awseventstargets.NewLambdaFunction(fn, nil),
@@ -54,7 +74,7 @@ func newFunction(stack awscdk.Construct) {
 	awsevents.NewRule(stack, jsii.String("G2lScheduleEvent"), &awsevents.RuleProps{
 		Schedule: awsevents.Schedule_Rate(awscdk.Duration_Minutes(jsii.Number(1))),
 		Targets:  &targets,
-		Enabled:  jsii.Bool(false),
+		Enabled:  jsii.Bool(true),
 	})
 }
 

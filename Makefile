@@ -5,6 +5,9 @@ REVISION ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 GO_LDFLAGS := -X main.version=$(VERSION)
 GO_LDFLAGS += -X main.revision=$(REVISION)
 
+DOTENV := ../.tmp/.env
+PROFILE :=
+
 all: build
 
 build: bin/g2l
@@ -12,13 +15,11 @@ build: bin/g2l
 bin/g2l: $(BUILD_FILES)
 	@go build -trimpath -ldflags "$(GO_LDFLAGS)" -o "$@" ./cmd/g2l
 
-build-lambda: deploy/lambda/g2l
-
-deploy/lambda/g2l: $(BUILD_FILES)
-	@go build -trimpath -ldflags "$(GO_LDFLAGS)" -o "$@" ./cmd/g2l
-
 lint:
 	@echo "golint running..."
 	@golint ./...
 	@echo "go vet running..."
 	@go vet ./...
+
+deploy:
+	cd cdk; ./run.sh $(DOTENV) $(PROFILE)
