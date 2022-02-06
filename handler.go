@@ -75,7 +75,7 @@ func (h *handler) gmailMessagesByPeriod(border time.Time) ([]*message, error) {
 	res, err := h.gmail.Users.Messages.
 		List(gmailUserID).
 		Fields(gmailMessageFields).
-		Q(fmt.Sprintf("%s after:%d", gmailMessageQuery, border.Unix())).
+		Q(fmt.Sprintf("is:unread %s after:%d", gmailMessageQuery, border.Unix())).
 		Do()
 
 	if err != nil {
@@ -93,6 +93,10 @@ func (h *handler) gmailMessagesByPeriod(border time.Time) ([]*message, error) {
 			continue
 		}
 		forwardMessages = append(forwardMessages, fw)
+		if err := h.GmailRemoveUnread(m.Id); err != nil {
+			fmt.Fprintf(os.Stderr, "failed modify message, remove unread: %v\n", err)
+			continue
+		}
 	}
 
 	return forwardMessages, nil
@@ -108,6 +112,19 @@ func (h *handler) GmailMessage(messageID string) (*message, error) {
 	}
 	msg.body = body
 	return msg, nil
+}
+
+func (h *handler) GmailRemoveUnread(messageID string) error {
+	_, err := h.gmail.Users.Messages.
+		Modify(
+			gmailUserID,
+			messageID,
+			&gmail.ModifyMessageRequest{
+				RemoveLabelIds: []string{"UNREAD"},
+			},
+		).
+		Do()
+	return err
 }
 
 func setHeaders(msg *message, headers []*gmail.MessagePartHeader) *message {

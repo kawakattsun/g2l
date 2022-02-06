@@ -55,7 +55,7 @@ func tokenFromFile(f io.Reader) (*oauth2.Token, error) {
 }
 
 func newGmailClient(jsonBytes []byte, token []byte) (*gmail.Service, error) {
-	config, err := google.ConfigFromJSON(jsonBytes, gmail.GmailReadonlyScope)
+	config, err := google.ConfigFromJSON(jsonBytes, gmail.GmailModifyScope)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse client secret file to config: %w", err)
 	}
