@@ -1,14 +1,9 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -21,10 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/kawakattsun/g2l"
 	"github.com/line/line-bot-sdk-go/linebot"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/gmail/v1"
-	"google.golang.org/api/option"
 )
 
 var (
@@ -37,35 +28,6 @@ var (
 	isLambda = strings.HasPrefix(os.Getenv("AWS_EXECUTION_ENV"), "AWS_Lambda") ||
 		os.Getenv("AWS_LAMBDA_RUNTIME_API") != ""
 )
-
-func getClient(ctx context.Context, config *oauth2.Config, f io.Reader) (*http.Client, error) {
-	tok, err := tokenFromFile(f)
-	if err != nil {
-		return nil, err
-	}
-	return config.Client(ctx, tok), nil
-}
-
-func tokenFromFile(f io.Reader) (*oauth2.Token, error) {
-	tok := &oauth2.Token{}
-	if err := json.NewDecoder(f).Decode(tok); err != nil {
-		return nil, err
-	}
-	return tok, nil
-}
-
-func newGmailClient(jsonBytes []byte, token []byte) (*gmail.Service, error) {
-	config, err := google.ConfigFromJSON(jsonBytes, gmail.GmailModifyScope)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse client secret file to config: %w", err)
-	}
-	ctx := context.Background()
-	client, err := getClient(ctx, config, bytes.NewReader(token))
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve http client: %w", err)
-	}
-	return gmail.NewService(ctx, option.WithHTTPClient(client))
-}
 
 func newLinebotClient(secret, token string) (*linebot.Client, error) {
 	return linebot.New(secret, token)
@@ -187,12 +149,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	gmailClient, err := newGmailClient(p.googleCredentials, p.googleToken)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to retrieve Gmail client: %v\n", err)
-		os.Exit(1)
-	}
-
 	lineClient, err := newLinebotClient(p.lineChannelSecret, p.lineChannelAccessToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to retrieve Linebot client: %v\n", err)
@@ -205,17 +161,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	handler := g2l.New(gmailClient, lineClient, p.forwardLineID, interval)
+	handler := g2l.New(lineClient, p.forwardLineID, interval)
 	if isLambda {
 		lambda.Start(func(event events.CloudWatchEvent) error {
-			if err := handler.Run(event.Time); err != nil {
+			if err := handler.Run(event.Time, p.googleCredentials, p.googleToken); err != nil {
 				fmt.Fprintf(os.Stderr, "handler run error: %v\n", err)
 			}
 			return nil
 		})
 	} else {
 		now := time.Now().In(jst).Truncate(60 * time.Second)
-		if err := handler.Run(now); err != nil {
+		if err := handler.Run(now, p.googleCredentials, p.googleToken); err != nil {
 			fmt.Fprintf(os.Stderr, "handler run error: %v\n", err)
 			os.Exit(1)
 		}

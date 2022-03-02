@@ -1,14 +1,22 @@
 package g2l
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/line/line-bot-sdk-go/linebot"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
+	"google.golang.org/api/option"
 )
 
 const (
@@ -23,7 +31,7 @@ var errorNoMessageFound = errors.New("no message found")
 
 // Handler g2l handler interface.
 type Handler interface {
-	Run(time.Time) error
+	Run(now time.Time, googleCredentials, googleToken []byte) error
 }
 
 type handler struct {
@@ -41,13 +49,11 @@ type message struct {
 
 // New new g2l instance.
 func New(
-	gmailClient *gmail.Service,
 	lineClient *linebot.Client,
 	forwardLineID string,
 	intervalMinutes time.Duration,
 ) Handler {
 	return &handler{
-		gmail:           gmailClient,
 		line:            lineClient,
 		forwardLineID:   forwardLineID,
 		intervalMinutes: intervalMinutes,
@@ -55,7 +61,12 @@ func New(
 }
 
 // Run running g2l program.
-func (h *handler) Run(now time.Time) error {
+func (h *handler) Run(now time.Time, googleCredentials, googleToken []byte) error {
+	gmailClient, err := newGmailClient(googleCredentials, googleToken)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve Gmail client: %w", err)
+	}
+	h.gmail = gmailClient
 	border := now.Add(-h.intervalMinutes)
 	msg, err := h.gmailMessagesByPeriod(border)
 	if err != nil {
@@ -169,4 +180,33 @@ func (h *handler) forwardToLine(forwardMessages []*message) error {
 		return err
 	}
 	return nil
+}
+
+func getClient(ctx context.Context, config *oauth2.Config, f io.Reader) (*http.Client, error) {
+	tok, err := tokenFromFile(f)
+	if err != nil {
+		return nil, err
+	}
+	return config.Client(ctx, tok), nil
+}
+
+func tokenFromFile(f io.Reader) (*oauth2.Token, error) {
+	tok := &oauth2.Token{}
+	if err := json.NewDecoder(f).Decode(tok); err != nil {
+		return nil, err
+	}
+	return tok, nil
+}
+
+func newGmailClient(jsonBytes []byte, token []byte) (*gmail.Service, error) {
+	config, err := google.ConfigFromJSON(jsonBytes, gmail.GmailModifyScope)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse client secret file to config: %w", err)
+	}
+	ctx := context.Background()
+	client, err := getClient(ctx, config, bytes.NewReader(token))
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve http client: %w", err)
+	}
+	return gmail.NewService(ctx, option.WithHTTPClient(client))
 }
