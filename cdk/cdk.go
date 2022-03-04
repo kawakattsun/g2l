@@ -74,7 +74,7 @@ func newFunction(stack awscdk.Construct) {
 	awsevents.NewRule(stack, jsii.String("G2lScheduleEvent"), &awsevents.RuleProps{
 		Schedule: awsevents.Schedule_Rate(awscdk.Duration_Minutes(jsii.Number(1))),
 		Targets:  &targets,
-		Enabled:  jsii.Bool(true),
+		Enabled:  jsii.Bool(false),
 	})
 }
 
